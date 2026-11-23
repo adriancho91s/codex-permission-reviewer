@@ -85,6 +85,14 @@ initialize-before-tools, independent request IDs/cancellation, shutdown behavior
 size bounds across chunk boundaries, and protocol-only stdout. Invalid input
 must fail predictably without executing anything.
 
+The app-server's `warning` notification carries advisory text and may name a
+thread. Validate its shape and verify its thread ID against the isolated review,
+including warnings received before the thread-start response. Discard the text
+without forwarding it to the model or the caller. A warning leaves the fresh
+review pending. The completed verdict still requires the same model, effort,
+permission profile, and validated assistant response. Unknown notifications,
+malformed messages, and server requests still fail closed.
+
 ## Evidence for throughput and quality
 
 Use injected adapters and deferred promises to test ordering, maximum active

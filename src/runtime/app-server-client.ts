@@ -78,6 +78,7 @@ const ALLOWED_ENV_KEYS = Object.freeze([
 
 const SAFE_NOTIFICATION_METHODS = new Set([
   "configWarning",
+  "warning",
   "remoteControl/status/changed",
   "account/rateLimits/updated",
   "thread/started",
@@ -567,7 +568,8 @@ function validateThreadTokenUsageNotification(params: unknown, state: ReviewStat
 function consumeServerMessage(message: UnknownRecord, state: ReviewState) {
   if (state.turnCompleted) fail("reviewer_unexpected_trailing_output", "The app-server emitted output after terminal completion.");
   if (Object.hasOwn(message, "id")) {
-    if (message.id === EXPECTED_INITIALIZE_ID || message.id === EXPECTED_THREAD_START_ID || message.id === EXPECTED_TURN_START_ID) {
+    if (!Object.hasOwn(message, "method") &&
+      (message.id === EXPECTED_INITIALIZE_ID || message.id === EXPECTED_THREAD_START_ID || message.id === EXPECTED_TURN_START_ID)) {
       state.responses.set(message.id, message);
       return;
     }
@@ -578,6 +580,21 @@ function consumeServerMessage(message: UnknownRecord, state: ReviewState) {
     fail(`reviewer_unsupported_notification_${diagnosticToken(method)}`, "The app-server emitted an unsupported notification.");
   }
   const params = isObject(message.params) ? message.params : {};
+  if (method === "warning") {
+    const { message: warning, threadId } = params;
+    if (typeof warning !== "string" || (threadId != null && (typeof threadId !== "string" || threadId.length === 0))) {
+      fail("reviewer_malformed_output", "The app-server warning notification was invalid.");
+    }
+    if (typeof threadId === "string") {
+      const expectedThreadId = state.threadId ?? state.warningThreadId;
+      if (expectedThreadId !== null && threadId !== expectedThreadId) {
+        fail("reviewer_malformed_output", "The app-server warning referenced another thread.");
+      }
+      state.warningThreadId = threadId;
+    }
+    // Diagnostic text is not part of the assistant response or isolation proof.
+    return;
+  }
   if (method === "thread/settings/updated") {
     validateThreadSettingsNotification(params, state);
     return;
@@ -785,6 +802,7 @@ export async function runCodexAppServer(prompt: unknown, options: Partial<AppSer
       turnCompleted: false,
       expectedCwd: runtime.cwd,
       threadId: null,
+      warningThreadId: null,
       settingsThreadId: null,
       statusThreadId: null,
       turnId: null,
@@ -813,6 +831,9 @@ export async function runCodexAppServer(prompt: unknown, options: Partial<AppSer
     await writeRequest(child, requests.threadStart);
     await waitForResponse(state, EXPECTED_THREAD_START_ID, readerPromise, childError, abortPromise);
     const threadId = validateThreadStart(validateRpcResponse(state.responses.get(EXPECTED_THREAD_START_ID), EXPECTED_THREAD_START_ID), runtime.cwd);
+    if (state.warningThreadId !== null && state.warningThreadId !== threadId) {
+      fail("reviewer_malformed_output", "The app-server warning referenced another thread.");
+    }
     if (state.settingsThreadId !== null && state.settingsThreadId !== threadId) {
       fail("reviewer_malformed_output", "The app-server thread settings referenced another thread.");
     }
