@@ -81,6 +81,7 @@ const SAFE_NOTIFICATION_METHODS = new Set([
   "warning",
   "remoteControl/status/changed",
   "account/rateLimits/updated",
+  "account/updated",
   "thread/started",
   "thread/settings/updated",
   "thread/status/changed",
@@ -593,6 +594,16 @@ function consumeServerMessage(message: UnknownRecord, state: ReviewState) {
       state.warningThreadId = threadId;
     }
     // Diagnostic text is not part of the assistant response or isolation proof.
+    return;
+  }
+  if (method === "account/updated") {
+    const { authMode, reason, planType } = params;
+    // The protocol distinguishes same-owner routing discovery from auth changes.
+    if (reason !== "workspaceRoutingReady" || authMode !== "chatgpt"
+      || (planType != null && typeof planType !== "string")
+      || Object.keys(params).some((key) => key !== "authMode" && key !== "reason" && key !== "planType")) {
+      fail("reviewer_unexpected_account_update", "The app-server reported an unexpected account update.");
+    }
     return;
   }
   if (method === "thread/settings/updated") {

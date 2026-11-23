@@ -93,6 +93,12 @@ review pending. The completed verdict still requires the same model, effort,
 permission profile, and validated assistant response. Unknown notifications,
 malformed messages, and server requests still fail closed.
 
+For `account/updated`, accept only the protocol's `workspaceRoutingReady`
+reason under managed ChatGPT OAuth. The app-server defines this reason as
+routing discovery for the same authenticated owner. The notification supplies
+no authorization or verdict. Sign-out, unknown account transitions, other auth
+modes, and malformed payloads still fail closed.
+
 ## Evidence for throughput and quality
 
 Use injected adapters and deferred promises to test ordering, maximum active
