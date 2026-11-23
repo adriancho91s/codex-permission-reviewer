@@ -50,7 +50,7 @@ test('runtime composition preserves no-tools configuration and filters inherited
   assert.ok(requests);
 });
 
-test('isolated app-server validates advisory warnings without substituting them for review', {
+test('isolated app-server validates advisory notifications without substituting them for review', {
   skip: process.platform === 'win32' && 'executable fixture uses a POSIX shebang',
 }, async (t) => {
   const home = await mkdtemp(join(tmpdir(), 'review-warning-fixture-'));
@@ -108,6 +108,26 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       ] as const) {
         await writeFixture(message);
         await assert.rejects(run(), failsWith(hazard));
+      }
+    });
+    await t.test('same-owner managed-account routing readiness leaves the verdict intact', async () => {
+      await writeFixture({
+        method: 'account/updated',
+        params: { authMode: 'chatgpt', planType: 'business', reason: 'workspaceRoutingReady' },
+      });
+      assert.equal(await run(), verdict);
+    });
+    await t.test('account changes and malformed routing payloads fail closed', async () => {
+      for (const params of [
+        { authMode: 'chatgpt', reason: 'unknown' },
+        { authMode: 'chatgpt', planType: 'business' },
+        { authMode: null, reason: 'workspaceRoutingReady' },
+        { authMode: 'apikey', reason: 'workspaceRoutingReady' },
+        { authMode: 'chatgpt', reason: 'workspaceRoutingReady', planType: {} },
+        { authMode: 'chatgpt', reason: 'workspaceRoutingReady', unexpected: 'fixture' },
+      ]) {
+        await writeFixture({ method: 'account/updated', params });
+        await assert.rejects(run(), failsWith('reviewer_unexpected_account_update'));
       }
     });
     await t.test('warnings do not replace isolation proof or a completed assistant result', async () => {
