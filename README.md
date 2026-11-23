@@ -64,6 +64,14 @@ The source installer adds the bundled permission-review skill to your
 replace differing skill content unless you rerun it with `--force` after
 reviewing the change.
 
+Pass `--on-demand` to the source install command to use the skill only when
+you explicitly invoke `$sensitive-permission-review` in a new Codex thread.
+Pass `--automatic` to restore implicit invocation. An install without either
+flag preserves your existing invocation setting. Both modes register the
+same review tool and preserve Codex host approvals and reviewer decisions.
+If you have customized the skill's `agents/openai.yaml`, review its contents
+before using `--force` to replace it.
+
 <details>
 <summary>Marketplace, release archive, and MCP details</summary>
 

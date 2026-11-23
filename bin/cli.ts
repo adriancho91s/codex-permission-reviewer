@@ -2,7 +2,7 @@
 import type { SpawnSyncOptions } from "node:child_process";
 
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, mkdir, readFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,8 @@ const MODEL_ENV = "CODEX_PERMISSION_REVIEW_MODEL";
 const EFFORT_ENV = "CODEX_PERMISSION_REVIEW_EFFORT";
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const DEFAULT_EFFORT = "max";
+const AUTOMATIC_POLICY = "policy:\n  allow_implicit_invocation: true\n";
+const ON_DEMAND_POLICY = "policy:\n  allow_implicit_invocation: false\n";
 
 function run(command: string, args: string[], options: SpawnSyncOptions = {}) {
   const result = spawnSync(command, args, {
@@ -35,7 +37,16 @@ function codexHome() {
   return join(homedir(), ".codex");
 }
 
-async function installSkill(force: boolean) {
+async function statIfPresent(path: string) {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return undefined;
+  }
+}
+
+async function installSkill(force: boolean, invocationPolicy: string | undefined) {
   const source = fileURLToPath(new URL("../../skills/sensitive-permission-review/SKILL.md", import.meta.url));
   const destination = join(codexHome(), "skills", "sensitive-permission-review", "SKILL.md");
   let existing = null;
@@ -48,13 +59,41 @@ async function installSkill(force: boolean) {
   if (existing !== null && existing !== bundled && !force) {
     throw new Error(`Refusing to overwrite ${destination}; rerun with --force after reviewing the difference.`);
   }
+  const agentsDirectory = join(dirname(destination), "agents");
+  const policyPath = join(agentsDirectory, "openai.yaml");
+  let existingPolicy: string | undefined;
+  if (invocationPolicy !== undefined) {
+    const agentsDirectoryStat = await statIfPresent(agentsDirectory);
+    if (agentsDirectoryStat && !agentsDirectoryStat.isDirectory()) {
+      throw new Error(`Expected a directory at ${agentsDirectory}.`);
+    }
+    const policyStat = await statIfPresent(policyPath);
+    if (policyStat) {
+      if (!policyStat.isFile()) throw new Error(`Expected a regular file at ${policyPath}.`);
+      existingPolicy = await readFile(policyPath, "utf8");
+      if (existingPolicy !== AUTOMATIC_POLICY && existingPolicy !== ON_DEMAND_POLICY && !force) {
+        throw new Error(`Refusing to overwrite ${policyPath}; rerun with --force after reviewing the difference.`);
+      }
+    }
+  }
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
   await copyFile(source, destination);
   await chmod(destination, 0o600);
+  if (invocationPolicy !== undefined && invocationPolicy !== existingPolicy) {
+    await mkdir(agentsDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(policyPath, invocationPolicy, {
+      flag: existingPolicy === undefined ? "wx" : "w",
+      mode: 0o600,
+    });
+  }
 }
 
 async function install() {
   const force = process.argv.includes("--force");
+  const onDemand = process.argv.includes("--on-demand");
+  const automatic = process.argv.includes("--automatic");
+  if (onDemand && automatic) throw new Error("Choose either --on-demand or --automatic.");
+  const invocationPolicy = onDemand ? ON_DEMAND_POLICY : automatic ? AUTOMATIC_POLICY : undefined;
   const modelIndex = process.argv.indexOf("--model");
   const effortIndex = process.argv.indexOf("--effort");
   const model = modelIndex === -1 ? DEFAULT_MODEL : process.argv[modelIndex + 1];
@@ -65,7 +104,7 @@ async function install() {
   if (typeof effort !== "string" || !["low", "medium", "high", "max"].includes(effort)) {
     throw new Error("--effort must be low, medium, high, or max.");
   }
-  await installSkill(force);
+  await installSkill(force, invocationPolicy);
   if (force) run("codex", ["mcp", "remove", MCP_NAME]);
   const status = run("codex", [
     "mcp",
@@ -91,7 +130,7 @@ function runMcp() {
 }
 
 function printHelp() {
-  process.stdout.write(`Usage:\n  ${PACKAGE_NAME} install [--force] [--model MODEL] [--effort low|medium|high|max]\n  ${PACKAGE_NAME} mcp\n`);
+  process.stdout.write(`Usage:\n  ${PACKAGE_NAME} install [--force] [--on-demand|--automatic] [--model MODEL] [--effort low|medium|high|max]\n  ${PACKAGE_NAME} mcp\n`);
 }
 
 const command = process.argv[2] ?? "install";
