@@ -99,6 +99,13 @@ routing discovery for the same authenticated owner. The notification supplies
 no authorization or verdict. Sign-out, unknown account transitions, other auth
 modes, and malformed payloads still fail closed.
 
+For `turn/moderationMetadata`, accept the exact inline presentation payload
+used by the Codex app-server integration fixture and bind it to the isolated
+thread and turn. The reviewer still requires a completed assistant response
+and all isolation checks. Safety block, recourse, final-answer moderation, and
+unrecognized payloads produce an incomplete review. The payload is never
+forwarded to the caller or logged.
+
 ## Evidence for throughput and quality
 
 Use injected adapters and deferred promises to test ordering, maximum active
