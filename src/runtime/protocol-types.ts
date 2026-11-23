@@ -11,6 +11,7 @@ export interface ReviewState {
   turnCompleted: boolean;
   expectedCwd: string;
   threadId: string | null;
+  warningThreadId: string | null;
   settingsThreadId: string | null;
   statusThreadId: string | null;
   turnId: string | null;
