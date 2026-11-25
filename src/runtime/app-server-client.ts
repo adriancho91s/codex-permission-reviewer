@@ -87,6 +87,7 @@ const SAFE_NOTIFICATION_METHODS = new Set([
   "thread/status/changed",
   "thread/tokenUsage/updated",
   "turn/started",
+  "turn/moderationMetadata",
   "turn/completed",
   "item/started",
   "item/completed",
@@ -622,6 +623,22 @@ function consumeServerMessage(message: UnknownRecord, state: ReviewState) {
     validateTurnNotification(params, "inProgress");
     return;
   }
+  if (method === "turn/moderationMetadata") {
+    const { threadId, turnId, metadata } = params;
+    const expectedTurnId = state.turnId ?? state.moderationTurnId;
+    if (typeof threadId !== "string" || threadId !== state.threadId
+      || typeof turnId !== "string" || turnId.length === 0
+      || (expectedTurnId !== null && turnId !== expectedTurnId)
+      || Object.keys(params).length !== 3) {
+      fail("reviewer_malformed_output", "The app-server moderation notification did not match the review turn.");
+    }
+    // Codex's protocol fixture pairs this exact presentation marker with a completed answer.
+    if (!isObject(metadata) || metadata.presentation !== "inline" || Object.keys(metadata).length !== 1) {
+      fail("reviewer_unrecognized_moderation_metadata", "The review turn reported unsupported moderation metadata.");
+    }
+    state.moderationTurnId = turnId;
+    return;
+  }
   if (method === "item/started") {
     validateItem(params.item);
     return;
@@ -817,6 +834,7 @@ export async function runCodexAppServer(prompt: unknown, options: Partial<AppSer
       settingsThreadId: null,
       statusThreadId: null,
       turnId: null,
+      moderationTurnId: null,
       tokenUsageThreadId: null,
       tokenUsageTurnId: null,
       sawExpectedEffort: false,
@@ -863,6 +881,9 @@ export async function runCodexAppServer(prompt: unknown, options: Partial<AppSer
     }
     state.turnId = turnId;
     await readerPromise;
+    if (state.moderationTurnId !== null && state.moderationTurnId !== turnId) {
+      fail("reviewer_malformed_output", "The app-server moderation notification referenced another turn.");
+    }
     if (!state.sawExpectedEffort) fail("reviewer_effort_mismatch", "The app-server did not prove the requested reasoning effort.");
     if (state.agentMessageCount !== 1 || typeof state.completedAgentText !== "string") fail("reviewer_malformed_output", "The app-server did not produce one assistant message.");
     if (state.agentText && state.agentText !== state.completedAgentText) fail("reviewer_malformed_output", "The app-server assistant deltas did not match the final item.");

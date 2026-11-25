@@ -15,6 +15,7 @@ export interface ReviewState {
   settingsThreadId: string | null;
   statusThreadId: string | null;
   turnId: string | null;
+  moderationTurnId: string | null;
   tokenUsageThreadId: string | null;
   tokenUsageTurnId: string | null;
   sawExpectedEffort: boolean;

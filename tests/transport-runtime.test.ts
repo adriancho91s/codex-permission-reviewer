@@ -58,7 +58,16 @@ test('isolated app-server validates advisory notifications without substituting 
   const priorHome = process.env.CODEX_HOME;
   const verdict = JSON.stringify({ verdict: 'deny', riskLevel: 'high' });
   const warning = { method: 'warning', params: { message: 'Advisory fixture', threadId: 'fixture-thread' } };
-  const writeFixture = (notification: object, options: { omitResult?: boolean; warningAfterTurn?: boolean; badProfile?: boolean } = {}) =>
+  const moderation = {
+    method: 'turn/moderationMetadata',
+    params: { threadId: 'fixture-thread', turnId: 'fixture-turn', metadata: { presentation: 'inline' } },
+  };
+  const writeFixture = (notification: object, options: {
+    omitResult?: boolean;
+    warningAfterTurn?: boolean;
+    badProfile?: boolean;
+    duringTurn?: boolean;
+  } = {}) =>
     writeFile(join(home, 'codex'), `#!${process.execPath}
 const { createInterface } = require('node:readline');
 const emit = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
@@ -70,11 +79,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (request.method === 'initialize') {
     emit({ id: request.id, result: { userAgent: 'codex-fixture', codexHome: process.env.CODEX_HOME } });
   } else if (request.method === 'thread/start') {
-    if (!options.warningAfterTurn) emit(notification);
+    if (!options.warningAfterTurn && !options.duringTurn) emit(notification);
     emit({ id: request.id, result: { model: request.params.model, approvalPolicy: 'never',
       cwd: request.params.cwd, thread: { id: 'fixture-thread', ephemeral: true },
       activePermissionProfile: { id: options.badProfile ? 'unexpected' : 'no-tools' }, sandbox: { type: 'readOnly' } } });
   } else if (request.method === 'turn/start') {
+    if (options.duringTurn) emit(notification);
     emit({ id: request.id, result: { turn: { id: 'fixture-turn', status: 'inProgress' } } });
     emit({ method: 'thread/settings/updated', params: { threadId: 'fixture-thread', threadSettings: {
       cwd: process.cwd(), model: request.params.model, approvalPolicy: 'never', effort: request.params.effort,
@@ -128,6 +138,35 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       ]) {
         await writeFixture({ method: 'account/updated', params });
         await assert.rejects(run(), failsWith('reviewer_unexpected_account_update'));
+      }
+    });
+    await t.test('inline presentation metadata preserves the completed review', async () => {
+      await writeFixture(moderation, { duringTurn: true });
+      assert.equal(await run(), verdict);
+      await writeFixture(moderation, { duringTurn: true, omitResult: true });
+      await assert.rejects(run(), failsWith('reviewer_malformed_output'));
+      await writeFixture(moderation, { warningAfterTurn: true });
+      await assert.rejects(run(), failsWith('reviewer_unexpected_trailing_output'));
+    });
+    await t.test('misbound, safety-related, and unknown moderation payloads stop the review', async () => {
+      for (const params of [
+        { ...moderation.params, threadId: 'other-thread' },
+        { ...moderation.params, turnId: 'other-turn' },
+        { ...moderation.params, turnId: '' },
+      ]) {
+        await writeFixture({ ...moderation, params }, { duringTurn: true });
+        await assert.rejects(run(), failsWith('reviewer_malformed_output'));
+      }
+      for (const metadata of [
+        null,
+        { presentation: 'banner' },
+        { presentation: 'inline', safety_block: { status: 'loading' } },
+        { safety_recourse: { status: 'ready' } },
+        { final_answer_moderation: { moderated: true } },
+        { presentation: 'inline', unknown: true },
+      ]) {
+        await writeFixture({ ...moderation, params: { ...moderation.params, metadata } }, { duringTurn: true });
+        await assert.rejects(run(), failsWith('reviewer_unrecognized_moderation_metadata'));
       }
     });
     await t.test('warnings do not replace isolation proof or a completed assistant result', async () => {
